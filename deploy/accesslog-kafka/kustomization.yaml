@@ -1,0 +1,22 @@
+# kubectl apply -k deploy/accesslog-kafka
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - k8s/vector-daemonset.yaml
+  - k8s/inventory-cronjob.yaml
+  - k8s/inventory-distributed.yaml
+configMapGenerator:
+  - name: vector-juicefs-config
+    namespace: juicefs-logging
+    files:
+      - vector/vector.yaml
+      - vector/parse_accesslog.vrl
+      - vector/source-socket.yaml
+  - name: juicefs-accesslog-reader
+    namespace: juicefs-logging
+    files:
+      - reader/juicefs_accesslog_reader.py
+  - name: juicefs-inventory-scripts
+    namespace: juicefs-logging
+    files:
+      - inventory/juicefs-inventory.py

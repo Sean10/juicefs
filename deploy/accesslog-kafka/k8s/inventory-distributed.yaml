@@ -1,0 +1,116 @@
+# Distributed weekly inventory: N worker pods (an Indexed Job) share a directory queue in a
+# small dedicated Redis and each produces its own part to Kafka; the union of the parts is
+# the full inventory. Works for every metadata engine (it uses JuiceFS's own pkg/meta).
+#
+# Image: build deploy/accesslog-kafka/inventory/jfs-inventory/Dockerfile and push it. The
+# lab setup below instead mounts a locally built binary into juicedata/mount (single node).
+# Secret: same juicefs-inventory secret as inventory-cronjob.yaml (key metaurl).
+# A failed worker makes the others stop after -stall-timeout; rerun the whole job
+# (kubectl -n juicefs-logging create job --from=cronjob/juicefs-inventory-distributed inv-rerun).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: inventory-queue
+  namespace: juicefs-logging
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: inventory-queue}
+  template:
+    metadata:
+      labels: {app: inventory-queue}
+    spec:
+      containers:
+        - name: redis
+          image: redis:7-alpine
+          args: ["--save", "", "--appendonly", "no"]
+          ports:
+            - containerPort: 6379
+          resources:
+            requests: {cpu: 100m, memory: 64Mi}
+            limits: {memory: 1Gi}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: inventory-queue
+  namespace: juicefs-logging
+spec:
+  selector: {app: inventory-queue}
+  ports:
+    - port: 6379
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: juicefs-inventory-distributed
+  namespace: juicefs-logging
+spec:
+  schedule: "0 2 * * 0"
+  timeZone: Asia/Shanghai
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 2
+  failedJobsHistoryLimit: 2
+  jobTemplate:
+    spec:
+      completionMode: Indexed
+      completions: 4
+      parallelism: 4
+      backoffLimit: 0
+      template:
+        metadata:
+          labels: {app: juicefs-inventory-worker}
+        spec:
+          restartPolicy: Never
+          affinity:
+            podAntiAffinity:
+              preferredDuringSchedulingIgnoredDuringExecution:
+                - weight: 100
+                  podAffinityTerm:
+                    topologyKey: kubernetes.io/hostname
+                    labelSelector:
+                      matchLabels: {app: juicefs-inventory-worker}
+          initContainers:
+            - name: list
+              image: juicedata/mount:ce-v1.4.0      # production: <registry>/jfs-inventory
+              command: ["/opt/jfs-inventory/jfs-inventory"]  # production: jfs-inventory
+              args: ["-threads", "8", "-wait-timeout", "2m", "-o", "/work/part.ndjson.gz"]
+              env:
+                - name: META_URL
+                  valueFrom: {secretKeyRef: {name: juicefs-inventory, key: metaurl}}
+                - name: QUEUE_URL
+                  value: redis://inventory-queue:6379/0
+                - name: JOB_ID   # same for all pods of one run, new for every run
+                  valueFrom: {fieldRef: {fieldPath: "metadata.labels['batch.kubernetes.io/job-name']"}}
+                - name: WORKER_ID
+                  valueFrom: {fieldRef: {fieldPath: metadata.name}}
+                - name: WAIT_WORKERS   # keep equal to completions/parallelism
+                  value: "4"
+              resources:
+                requests: {cpu: "1", memory: 512Mi}
+              volumeMounts:
+                - {name: work, mountPath: /work}
+                - {name: bin, mountPath: /opt/jfs-inventory}   # lab only
+          containers:
+            - name: produce
+              image: edenhill/kcat:1.7.1
+              command: ["sh", "-c"]
+              args:
+                - |
+                  set -e
+                  gzip -dc /work/part.ndjson.gz | kcat -P -b "$KAFKA_BOOTSTRAP" -t "$KAFKA_TOPIC" -z lz4 -X linger.ms=100
+                  echo "part $JOB_COMPLETION_INDEX: produced $(gzip -dc /work/part.ndjson.gz | wc -l) records to $KAFKA_TOPIC"
+              env:
+                - name: KAFKA_BOOTSTRAP
+                  value: "172.30.0.2:9092"
+                - name: KAFKA_TOPIC
+                  value: juicefs-inventory
+              volumeMounts:
+                - {name: work, mountPath: /work}
+          volumes:
+            - name: work
+              emptyDir: {}
+            - name: bin   # lab only: binary built on the node
+              hostPath:
+                path: /opt/lab/bin
+                type: Directory

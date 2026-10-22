@@ -1,0 +1,18 @@
+# Run JuiceFS CSI mount pods with hostPID so that the pid recorded in the access log is the
+# caller's host pid (otherwise callers in other pods are outside the mount pod's PID
+# namespace and are logged as pid 0). The reader resolves host pids to pod UIDs.
+#
+# This REPLACES the CSI global config: merge it with your existing config.yaml first
+# (kubectl -n kube-system get cm juicefs-csi-driver-config -o yaml). Only mount pods created
+# after the change get hostPID; recreate existing ones (e.g. restart the app pods, or use
+# the CSI smooth upgrade) to apply it.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: juicefs-csi-driver-config
+  namespace: kube-system
+data:
+  config.yaml: |-
+    enableNodeSelector: false
+    mountPodPatch:
+      - hostPID: true
