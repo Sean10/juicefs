@@ -1,0 +1,132 @@
+# Parse one JuiceFS access log record (JuiceFS 1.3.x / 1.4.x, identical format).
+#
+# Input .message:  "<mountpoint>\t<access log line>" (from juicefs-accesslog-reader.sh)
+# Access log line: "<ts> [uid:U,gid:G,pid:P] <op> (<args>)[:<result>][ [fh:N]] - <status> <<seconds>>"
+#   2026.10.22 14:45:37.690413 [uid:0,gid:0,pid:6746] create (2,a.txt,-rw-r--r--:0100644): (4,[...]) [fh:8] - OK <0.000136>
+#
+# Records that cannot be parsed are aborted; with reroute_dropped they go to "<transform>.dropped".
+
+msg = string!(.message)
+parts = split(msg, "\t", limit: 2)
+if length(parts) != 2 {
+  .raw = msg
+  abort
+}
+.mountpoint = parts[0]
+.raw = parts[1]
+
+p, err = parse_regex(.raw, r'^(?P<ts>\d{4}\.\d{2}\.\d{2} \d{2}:\d{2}:\d{2}\.\d{6}) \[uid:(?P<uid>\d+),gid:(?P<gid>\d+),pid:(?P<pid>\d+)\] (?P<op>[a-z_]+) \((?P<args>.*?)\)(?::\s?(?P<result>.*?))?(?: \[fh:(?P<fh>\d+)\])? - (?P<status>[^<]+?) <(?P<dur>\d+\.\d+)>$')
+if err != null {
+  abort
+}
+
+# The access log timestamp carries no zone: it is rendered in the JuiceFS client's local
+# time zone. JUICEFS_TZ must match the TZ of the juicefs process (mount pods default to UTC).
+.ts_ingest = .timestamp
+ts, err = parse_timestamp(p.ts, format: "%Y.%m.%d %H:%M:%S%.6f", timezone: get_env_var("JUICEFS_TZ") ?? "UTC")
+if err == null {
+  .timestamp = ts
+}
+
+.op = p.op
+.uid = to_int!(p.uid)
+.gid = to_int!(p.gid)
+.pid = to_int!(p.pid)
+.status = p.status
+.ok = p.status == "OK"
+.duration_us = to_int(round(to_float!(p.dur) * 1000000))
+if p.fh != null {
+  .fh = to_int!(p.fh)
+}
+args = string!(p.args)
+result = string(p.result) ?? ""
+.args = args
+if result != "" {
+  .result = result
+}
+
+# First argument is the inode for every op (setattr renders it as "ino[fh]").
+first = parse_regex(args, r'^(?P<ino>\d+)(?:\[(?P<fh>\d+)\])?') ?? {}
+if first.ino != null {
+  .inode = to_int!(first.ino)
+}
+if first.fh != null && first.fh != "0" {
+  .fh = to_int!(first.fh)
+}
+
+# Ops that create or resolve a name return "(ino,[attr])" as result.
+res = parse_regex(result, r'^\s*\((?P<ino>\d+),\[(?P<attr>[^\]]*)\]\)') ?? {}
+
+op = .op
+if includes(["lookup", "unlink", "rmdir"], op) {
+  m = parse_regex(args, r'^(?P<parent>\d+),(?P<name>.*)$') ?? {}
+  .parent_inode = to_int(m.parent) ?? null
+  .name = m.name
+  .inode = null
+  if res.ino != null { .inode = to_int!(res.ino) }
+} else if includes(["create", "mkdir", "mknod"], op) {
+  m = parse_regex(args, r'^(?P<parent>\d+),(?P<name>.*),(?P<modestr>[-?a-zA-Z]{10}):(?P<mode>0[0-7]+)(?:,0x[0-9A-F]+)?$') ?? {}
+  .parent_inode = to_int(m.parent) ?? null
+  .name = m.name
+  .mode = m.mode
+  .inode = null
+  if res.ino != null { .inode = to_int!(res.ino) }
+} else if op == "symlink" {
+  m = parse_regex(args, r'^(?P<parent>\d+),(?P<name>[^,]*),(?P<target>.*)$') ?? {}
+  .parent_inode = to_int(m.parent) ?? null
+  .name = m.name
+  .symlink_target = m.target
+  .inode = null
+  if res.ino != null { .inode = to_int!(res.ino) }
+} else if op == "link" {
+  m = parse_regex(args, r'^(?P<ino>\d+),(?P<parent>\d+),(?P<name>.*)$') ?? {}
+  .parent_inode = to_int(m.parent) ?? null
+  .name = m.name
+} else if op == "rename" {
+  m = parse_regex(args, r'^(?P<parent>\d+),(?P<name>.*),(?P<newparent>\d+),(?P<newname>.*),(?P<flags>\d+)$') ?? {}
+  .parent_inode = to_int(m.parent) ?? null
+  .name = m.name
+  .new_parent_inode = to_int(m.newparent) ?? null
+  .new_name = m.newname
+  .inode = null
+} else if includes(["read", "write"], op) {
+  # (ino,size,offset,fh); read returns the number of bytes actually read.
+  m = parse_regex(args, r'^(?P<ino>\d+),(?P<size>\d+),(?P<off>\d+),(?P<fh>\d+)$') ?? {}
+  .offset = to_int(m.off) ?? null
+  .fh = to_int(m.fh) ?? null
+  .bytes = 0
+  if .ok {
+    if op == "write" {
+      .bytes = to_int(m.size) ?? 0
+    } else {
+      n = parse_regex(result, r'^\s*\(?(?P<n>\d+)\)?') ?? {}
+      .bytes = to_int(n.n) ?? 0
+    }
+  }
+} else if op == "copy_file_range" {
+  m = parse_regex(args, r'^(?P<ino>\d+),(?P<offin>\d+),(?P<inodeout>\d+),(?P<offout>\d+),(?P<size>\d+),(?P<flags>\d+)$') ?? {}
+  .inode_out = to_int(m.inodeout) ?? null
+  .bytes = to_int(m.size) ?? 0
+} else if includes(["open", "flush", "release", "releasedir", "fsync", "opendir"], op) {
+  if op == "flush" || op == "release" {
+    m = parse_regex(args, r'^\d+,(?P<fh>\d+)') ?? {}
+    .fh = to_int(m.fh) ?? .fh
+  }
+  if op == "open" {
+    m = parse_regex(args, r'^\d+,(?P<flags>0x[0-9a-f]+)') ?? {}
+    .open_flags = m.flags
+  }
+}
+
+# Size (last field of the attr list) when the result carries file attributes.
+if res.attr != null {
+  attrs = split(string!(res.attr), ",")
+  .file_size = to_int(attrs[-1]) ?? null
+}
+
+del(.message)
+del(.source_type)
+del(.command)
+del(.data_stream)
+del(.stream)
+. = compact(., null: true, string: false, object: false, array: false)
