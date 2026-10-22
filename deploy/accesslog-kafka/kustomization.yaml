@@ -4,6 +4,7 @@ kind: Kustomization
 resources:
   - k8s/vector-daemonset.yaml
   - k8s/inventory-cronjob.yaml
+  - k8s/inventory-distributed.yaml
 configMapGenerator:
   - name: vector-juicefs-config
     namespace: juicefs-logging

@@ -94,8 +94,12 @@ def iter_inventory(lines, root_path="/"):
         yield tuple(held)
 
 
+EPOCH = datetime.datetime(1970, 1, 1, tzinfo=datetime.timezone.utc)
+
+
 def ts(sec, nsec):
-    return datetime.datetime.fromtimestamp(sec + nsec / 1e9, datetime.timezone.utc).isoformat()
+    t = EPOCH + datetime.timedelta(seconds=sec, microseconds=nsec // 1000)
+    return t.isoformat(timespec="microseconds")
 
 
 def main():
