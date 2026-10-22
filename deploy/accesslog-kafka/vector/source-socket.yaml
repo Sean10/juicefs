@@ -1,0 +1,14 @@
+# Kubernetes: the reader runs in a sidecar and connects to this unix socket
+# (shared emptyDir); it reconnects automatically when Vector restarts.
+sources:
+  jfs_accesslog_raw:
+    type: socket
+    mode: unix_stream
+    path: /run/jfs-accesslog/reader.sock
+    socket_file_mode: 0o660
+    decoding:
+      codec: json
+    framing:
+      method: newline_delimited
+      newline_delimited:
+        max_length: 1048576

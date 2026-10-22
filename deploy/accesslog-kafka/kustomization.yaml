@@ -10,7 +10,11 @@ configMapGenerator:
     files:
       - vector/vector.yaml
       - vector/parse_accesslog.vrl
-      - vector/juicefs-accesslog-reader.sh
+      - vector/source-socket.yaml
+  - name: juicefs-accesslog-reader
+    namespace: juicefs-logging
+    files:
+      - reader/juicefs_accesslog_reader.py
   - name: juicefs-inventory-scripts
     namespace: juicefs-logging
     files:

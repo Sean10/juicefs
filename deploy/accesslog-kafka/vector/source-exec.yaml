@@ -1,0 +1,17 @@
+# Bare metal: Vector runs the reader and consumes its stdout.
+# The reader needs python3 (3.6+) and root to open "<mountpoint>/.accesslog".
+sources:
+  jfs_accesslog_raw:
+    type: exec
+    mode: streaming
+    command: ["python3", "${JFS_VECTOR_DIR:-/etc/vector}/juicefs_accesslog_reader.py"]
+    include_stderr: false
+    streaming:
+      respawn_on_exit: true
+      respawn_interval_secs: 5
+    decoding:
+      codec: json
+    framing:
+      method: newline_delimited
+      newline_delimited:
+        max_length: 1048576
