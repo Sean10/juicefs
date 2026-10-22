@@ -1,0 +1,122 @@
+# Lab only: JuiceFS CSI volume backed by Redis metadata + a local directory as "object storage".
+# The bucket directory is mounted into the mount pod with juicefs/host-path, so this only
+# works on a single node. Replace metaurl/storage/bucket with real values in production.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: juicefs-k8sfs
+  namespace: kube-system
+type: Opaque
+stringData:
+  name: k8sfs
+  metaurl: redis://172.30.0.2:6379/3
+  storage: file
+  bucket: /var/lib/jfs-lab/bucket/
+---
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: juicefs-sc
+provisioner: csi.juicefs.com
+reclaimPolicy: Delete
+volumeBindingMode: Immediate
+parameters:
+  csi.storage.k8s.io/provisioner-secret-name: juicefs-k8sfs
+  csi.storage.k8s.io/provisioner-secret-namespace: kube-system
+  csi.storage.k8s.io/node-publish-secret-name: juicefs-k8sfs
+  csi.storage.k8s.io/node-publish-secret-namespace: kube-system
+  juicefs/mount-image: juicedata/mount:ce-v1.4.0
+  juicefs/host-path: /var/lib/jfs-lab/bucket
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: data-a
+  namespace: default
+spec:
+  accessModes: [ReadWriteMany]
+  storageClassName: juicefs-sc
+  resources:
+    requests:
+      storage: 10Gi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: data-b
+  namespace: default
+spec:
+  accessModes: [ReadWriteMany]
+  storageClassName: juicefs-sc
+  resources:
+    requests:
+      storage: 10Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: writer
+  namespace: default
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: writer}
+  template:
+    metadata:
+      labels: {app: writer}
+    spec:
+      containers:
+        - name: app
+          image: busybox:1.36
+          command: ["sh", "-c"]
+          args:
+            - |
+              i=0
+              while true; do
+                i=$((i+1))
+                mkdir -p /data/day-$((i % 3))
+                dd if=/dev/urandom of=/data/day-$((i % 3))/obj-$i.bin bs=256k count=4 2>/dev/null
+                cat /data/day-$((i % 3))/obj-$i.bin > /dev/null
+                ls /data/day-$((i % 3)) > /dev/null
+                [ $((i % 5)) -eq 0 ] && rm -f /data/day-$((i % 3))/obj-$((i-4)).bin
+                sleep 2
+              done
+          volumeMounts:
+            - name: data
+              mountPath: /data
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: data-a
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: reader
+  namespace: default
+spec:
+  replicas: 2
+  selector:
+    matchLabels: {app: reader}
+  template:
+    metadata:
+      labels: {app: reader}
+    spec:
+      containers:
+        - name: app
+          image: busybox:1.36
+          command: ["sh", "-c"]
+          args:
+            - |
+              while true; do
+                find /data -type f | head -20 | while read f; do cat "$f" > /dev/null; done
+                echo "$(hostname) $(date)" >> /data/reader-$(hostname).log
+                sleep 3
+              done
+          volumeMounts:
+            - name: data
+              mountPath: /data
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: data-b

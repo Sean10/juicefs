@@ -6,7 +6,7 @@ tests:
       - insert_at: jfs_accesslog_parsed
         type: log
         log_fields:
-          message: "/jfs\t2026.10.22 14:51:42.688249 [uid:0,gid:0,pid:8358] create (50,报告,v1.txt,-rw-r--r--:0100644): (54,[-rw-r--r--:0100644,1,0,0,1792680702,1792680702,1792680702,0]) [fh:244] - OK <0.000158>"
+          message: "/jfs\t\t\t\t\t\t2026.10.22 14:51:42.688249 [uid:0,gid:0,pid:8358] create (50,报告,v1.txt,-rw-r--r--:0100644): (54,[-rw-r--r--:0100644,1,0,0,1792680702,1792680702,1792680702,0]) [fh:244] - OK <0.000158>"
     outputs:
       - extract_from: jfs_accesslog_parsed
         conditions:
@@ -23,12 +23,32 @@ tests:
               assert_eq!(.ok, true)
               assert_eq!(.timestamp, t'2026-10-22T14:51:42.688249Z')
 
+  - name: kubernetes context columns
+    inputs:
+      - insert_at: jfs_accesslog_parsed
+        type: log
+        log_fields:
+          message: "/var/lib/juicefs/volume/pvc-9f956028-06fe-419b-b612-f0020ac03fb8-arhfvq\tdd\t0d3c7a8e-1111-2222-3333-444455556666\tdefault\twriter-56bdc5d5bb-zgzsx\tdefault/data-a\t2026.10.22 15:02:19.246343 [uid:0,gid:0,pid:28711] write (2102,131072,0,208) - OK <0.000065>"
+    outputs:
+      - extract_from: jfs_accesslog_enriched
+        conditions:
+          - type: vrl
+            source: |
+              assert_eq!(.pv, "pvc-9f956028-06fe-419b-b612-f0020ac03fb8")
+              assert_eq!(.pvc, "default/data-a")
+              assert_eq!(.comm, "dd")
+              assert_eq!(.pod_uid, "0d3c7a8e-1111-2222-3333-444455556666")
+              assert_eq!(.pod_namespace, "default")
+              assert_eq!(.pod_name, "writer-56bdc5d5bb-zgzsx")
+              assert_eq!(.pid, 28711)
+              assert!(!exists(.raw))
+
   - name: read returns bytes actually read
     inputs:
       - insert_at: jfs_accesslog_parsed
         type: log
         log_fields:
-          message: "/jfs\t2026.10.22 14:45:37.717576 [uid:1000,gid:1000,pid:6751] read (4,4096,0,11): (6) - OK <0.000166>"
+          message: "/jfs\t\t\t\t\t\t2026.10.22 14:45:37.717576 [uid:1000,gid:1000,pid:6751] read (4,4096,0,11): (6) - OK <0.000166>"
     outputs:
       - extract_from: jfs_accesslog_parsed
         conditions:
@@ -46,7 +66,7 @@ tests:
       - insert_at: jfs_accesslog_parsed
         type: log
         log_fields:
-          message: "/jfs\t2026.10.22 14:45:37.696327 [uid:0,gid:0,pid:6748] write (5,131072,131072,10) - OK <0.000064>"
+          message: "/jfs\t\t\t\t\t\t2026.10.22 14:45:37.696327 [uid:0,gid:0,pid:6748] write (5,131072,131072,10) - OK <0.000064>"
     outputs:
       - extract_from: jfs_accesslog_parsed
         conditions:
@@ -63,7 +83,7 @@ tests:
       - insert_at: jfs_accesslog_parsed
         type: log
         log_fields:
-          message: "/jfs\t2026.10.22 14:45:37.688824 [uid:0,gid:0,pid:6747] lookup (1,d1): - no such file or directory <0.000207>"
+          message: "/jfs\t\t\t\t\t\t2026.10.22 14:45:37.688824 [uid:0,gid:0,pid:6747] lookup (1,d1): - no such file or directory <0.000207>"
     outputs:
       - extract_from: jfs_accesslog_parsed
         conditions:
@@ -81,7 +101,7 @@ tests:
       - insert_at: jfs_accesslog_parsed
         type: log
         log_fields:
-          message: "/jfs\t2026.10.22 14:45:37.721173 [uid:0,gid:0,pid:6753] rename (2,a.txt,3,b.txt,1) - OK <0.000270>"
+          message: "/jfs\t\t\t\t\t\t2026.10.22 14:45:37.721173 [uid:0,gid:0,pid:6753] rename (2,a.txt,3,b.txt,1) - OK <0.000270>"
     outputs:
       - extract_from: jfs_accesslog_parsed
         conditions:
@@ -97,7 +117,7 @@ tests:
       - insert_at: jfs_accesslog_parsed
         type: log
         log_fields:
-          message: "/jfs\t2026.10.22 14:45:37.725094 [uid:0,gid:0,pid:6757] setattr (5[14],0x248,[size=1048576]): (5,[-rw-------:0100600,1,0,0,1792680337,1792680337,1792680337,1048576]) - OK <0.000151>"
+          message: "/jfs\t\t\t\t\t\t2026.10.22 14:45:37.725094 [uid:0,gid:0,pid:6757] setattr (5[14],0x248,[size=1048576]): (5,[-rw-------:0100600,1,0,0,1792680337,1792680337,1792680337,1048576]) - OK <0.000151>"
     outputs:
       - extract_from: jfs_accesslog_parsed
         conditions:
@@ -113,7 +133,7 @@ tests:
       - insert_at: jfs_accesslog_parsed
         type: log
         log_fields:
-          message: "/jfs\t2026.10.22 14:45:36.687997 [uid:0,gid:0,pid:6741] open (9223372032559808513,0x8000) [fh:5] - OK <0.000016>"
+          message: "/jfs\t\t\t\t\t\t2026.10.22 14:45:36.687997 [uid:0,gid:0,pid:6741] open (9223372032559808513,0x8000) [fh:5] - OK <0.000016>"
     no_outputs_from:
       - jfs_accesslog_filtered
 
@@ -122,11 +142,11 @@ tests:
       - insert_at: jfs_accesslog_parsed
         type: log
         log_fields:
-          message: "/jfs\tthis is not an access log line"
+          message: "/jfs\t\t\t\t\t\tthis is not an access log line"
     outputs:
       - extract_from: jfs_accesslog_parsed.dropped
         conditions:
           - type: vrl
             source: |
-              assert_eq!(.message, "/jfs\tthis is not an access log line")
+              assert_eq!(.message, "/jfs\t\t\t\t\t\tthis is not an access log line")
               assert_eq!(.metadata.dropped.reason, "abort")
