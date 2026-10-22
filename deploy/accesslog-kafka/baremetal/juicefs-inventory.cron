@@ -1,4 +1,8 @@
 # /etc/cron.d/juicefs-inventory: weekly full inventory, Sunday 02:00 (server local time)
 SHELL=/bin/bash
 PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+# Option 1, no build needed: juicefs dump + juicefs-inventory.py (fine up to tens of millions of entries)
 0 2 * * 0 root META_URL=redis://10.0.0.1:6379/1 META_PASSWORD=changeme VOLUME=myjfs KAFKA_BOOTSTRAP=172.30.0.2:9092 /opt/juicefs-accesslog-kafka/inventory/juicefs-inventory.sh >> /var/log/juicefs-inventory.log 2>&1
+# Option 2, jfs-inventory (5-10x faster); for several machines add the same line on each with
+#   -queue redis://coord:6379/0 -job $(date +\%Y\%m\%d) -wait-workers <N>
+# 0 2 * * 0 root META_PASSWORD=changeme /usr/local/bin/jfs-inventory -meta redis://10.0.0.1:6379/1 -o /var/lib/juicefs-inventory/myjfs-$(date +\%Y\%m\%d).ndjson.gz >> /var/log/juicefs-inventory.log 2>&1
