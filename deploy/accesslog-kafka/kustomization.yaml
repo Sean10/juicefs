@@ -3,6 +3,7 @@ apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 resources:
   - k8s/vector-daemonset.yaml
+  - k8s/inventory-cronjob.yaml
 configMapGenerator:
   - name: vector-juicefs-config
     namespace: juicefs-logging
@@ -10,3 +11,7 @@ configMapGenerator:
       - vector/vector.yaml
       - vector/parse_accesslog.vrl
       - vector/juicefs-accesslog-reader.sh
+  - name: juicefs-inventory-scripts
+    namespace: juicefs-logging
+    files:
+      - inventory/juicefs-inventory.py
