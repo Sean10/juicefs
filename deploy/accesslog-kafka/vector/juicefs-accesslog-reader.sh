@@ -2,7 +2,9 @@
 # Stream the virtual ".accesslog" file of every JuiceFS FUSE mount on this host to stdout.
 #
 # Output format (one line per access log record, tab separated):
-#   <mountpoint> <comm> <pod_uid> <pod_namespace> <pod_name> <pvc> <raw access log line>
+#   <mountpoint> <volume> <subdir> <comm> <pod_uid> <pod_namespace> <pod_name> <pvc> <raw line>
+# volume / subdir come from "<mountpoint>/.config" (volume name and mount --subdir), so that
+# (volume, inode) is a unique key to join with the file inventory.
 #
 # - Mount points are discovered from mountinfo (fstype fuse.juicefs), de-duplicated by
 #   device id. Only the root of a JuiceFS mount exposes ".accesslog".
@@ -55,6 +57,9 @@ my $meta = $ENV{K8S_META_DIR} || "";
 my (%pidc, %pods, %pvs, $metaAt);
 my $pv = ($mp =~ m{/([^/]+)-[a-z0-9]{6}$}) ? $1 : "";
 sub slurp { my $f = shift; open(my $h, "<", $f) or return ""; local $/; my $s = <$h>; close $h; return $s // ""; }
+my $conf = slurp("$mp/.config");
+my $vol = ($conf =~ /"Format":\s*\{.*?"Name":\s*"([^"]*)"/s) ? $1 : "";
+my $subdir = ($conf =~ /"Subdir":\s*"([^"]*)"/) ? $1 : "";
 sub loadmeta {
     return if !$meta || (defined $metaAt && time - $metaAt < 30);
     $metaAt = time;
@@ -85,7 +90,7 @@ while (my $l = <STDIN>) {
     my ($ns, $name) = $uid && $pods{$uid} ? @{$pods{$uid}} : ("", "");
     my $pvc = $pv && $pvs{$pv} ? join("/", @{$pvs{$pv}}) : "";
     $comm =~ tr/\t/ /;
-    print join("\t", $mp, $comm, $uid, $ns // "", $name // "", $pvc, $l);
+    print join("\t", $mp, $vol, $subdir, $comm, $uid, $ns // "", $name // "", $pvc, $l);
 }
 PERL
 

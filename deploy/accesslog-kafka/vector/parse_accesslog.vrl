@@ -1,24 +1,26 @@
 # Parse one JuiceFS access log record (JuiceFS 1.3.x / 1.4.x, identical format).
 #
 # Input .message (from juicefs-accesslog-reader.sh, tab separated):
-#   <mountpoint> <comm> <pod_uid> <pod_namespace> <pod_name> <pvc> <access log line>
+#   <mountpoint> <volume> <subdir> <comm> <pod_uid> <pod_namespace> <pod_name> <pvc> <access log line>
 # Access log line: "<ts> [uid:U,gid:G,pid:P] <op> (<args>)[:<result>][ [fh:N]] - <status> <<seconds>>"
 #   2026.10.22 14:45:37.690413 [uid:0,gid:0,pid:6746] create (2,a.txt,-rw-r--r--:0100644): (4,[...]) [fh:8] - OK <0.000136>
 #
 # Records that cannot be parsed are aborted; with reroute_dropped they go to "<transform>.dropped".
 
 msg = string!(.message)
-parts = split(msg, "\t", limit: 7)
-if length(parts) != 7 {
+parts = split(msg, "\t", limit: 9)
+if length(parts) != 9 {
   abort
 }
 .mountpoint = parts[0]
-if parts[1] != "" { .comm = parts[1] }
-if parts[2] != "" { .pod_uid = parts[2] }
-if parts[3] != "" { .pod_namespace = parts[3] }
-if parts[4] != "" { .pod_name = parts[4] }
-if parts[5] != "" { .pvc = parts[5] }
-.raw = parts[6]
+if parts[1] != "" { .volume = parts[1] }
+if parts[2] != "" { .subdir = parts[2] }
+if parts[3] != "" { .comm = parts[3] }
+if parts[4] != "" { .pod_uid = parts[4] }
+if parts[5] != "" { .pod_namespace = parts[5] }
+if parts[6] != "" { .pod_name = parts[6] }
+if parts[7] != "" { .pvc = parts[7] }
+.raw = parts[8]
 
 p, err = parse_regex(.raw, r'^(?P<ts>\d{4}\.\d{2}\.\d{2} \d{2}:\d{2}:\d{2}\.\d{6}) \[uid:(?P<uid>\d+),gid:(?P<gid>\d+),pid:(?P<pid>\d+)\] (?P<op>[a-z_]+) \((?P<args>.*?)\)(?::\s?(?P<result>.*?))?(?: \[fh:(?P<fh>\d+)\])? - (?P<status>[^<]+?) <(?P<dur>\d+\.\d+)>$')
 if err != null {
